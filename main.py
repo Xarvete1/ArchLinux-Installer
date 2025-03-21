@@ -1,14 +1,6 @@
 import subprocess
 import os
-from prompt_toolkit import PromptSession
-from prompt_toolkit.validation import Validator, ValidationError
-from prompt_toolkit.shortcuts import confirm, radiolist_dialog, input_dialog, password_dialog
-
-class NonEmptyValidator(Validator):
-    def validate(self, document):
-        text = document.text
-        if not text or " " in text:
-            raise ValidationError(message="Имя не может быть пустым или содержать пробелы")
+import sys
 
 def get_available_disks():
     try:
@@ -17,13 +9,13 @@ def get_available_disks():
         return disks if disks else []
     except Exception as e:
         print(f"Ошибка получения дисков: {e}")
-        exit(1)
+        sys.exit(1)
 
 def install_system(username, password, disk, filesystem, use_swap, swap_size, timezone, locale, use_luks, luks_password, bootloader):
     print("Шаг 1: Подготовка диска...")
     root_part = f"{disk}1"
     swap_part = f"{disk}2"
-    print(f"Создание разделов на {disk}...")
+    print(f"Создание разделов на {disk}... (предполагается ручная разметка)")
 
     if use_luks:
         print(f"Шаг 2: Настройка LUKS на {root_part}...")
@@ -43,7 +35,7 @@ def install_system(username, password, disk, filesystem, use_swap, swap_size, ti
 
     print("Шаг 5: Настройка системы...")
     subprocess.run(["genfstab", "-U", "/mnt"], check=True)
-    subprocess.run(["arch-chroot", "/mnt"], check=True)  # Требует доработки
+    subprocess.run(["arch-chroot", "/mnt"], check=True)  # Упрощено
 
     print("Шаг 6: Установка часового пояса и локали...")
     subprocess.run(["ln", "-sf", f"/usr/share/zoneinfo/{timezone}", "/etc/localtime"], check=True)
@@ -64,120 +56,104 @@ def install_system(username, password, disk, filesystem, use_swap, swap_size, ti
 
 def main():
     print("Добро пожаловать в ArchLinux Installer!")
-    session = PromptSession()
 
-    username = input_dialog(
-        title="Имя пользователя",
-        text="Введите имя пользователя:",
-        validator=NonEmptyValidator()
-    ).run()
-    if not username:
-        print("Ошибка ввода. Установка прервана.")
-        exit(1)
+    # 1. Имя пользователя
+    while True:
+        username = input("Введите имя пользователя: ").strip()
+        if username and " " not in username:
+            break
+        print("Имя не может быть пустым или содержать пробелы.")
 
-    password = password_dialog(
-        title="Пароль",
-        text="Введите пароль:"
-    ).run()
-    password_confirm = password_dialog(
-        title="Пароль",
-        text="Повторите пароль:"
-    ).run()
-    if password != password_confirm or not password:
-        print("Пароли не совпадают или пустые. Установка прервана.")
-        exit(1)
+    # 2. Пароль
+    while True:
+        password = input("Введите пароль: ")
+        password_confirm = input("Повторите пароль: ")
+        if password == password_confirm and password:
+            break
+        print("Пароли не совпадают или пустые.")
 
+    # 3. Выбор диска
     disks = get_available_disks()
     if not disks:
         print("Диски не найдены. Установка прервана.")
-        exit(1)
-    selected_disk = radiolist_dialog(
-        title="Выбор диска",
-        text="Выберите диск для установки:",
-        values=[(disk, disk) for disk in disks]
-    ).run()
-    if not selected_disk:
-        print("Диск не выбран. Установка прервана.")
-        exit(1)
+        sys.exit(1)
+    print("Доступные диски:", ", ".join(disks))
+    while True:
+        disk = input("Выберите диск для установки (например, /dev/sda): ").strip()
+        if disk in disks:
+            break
+        print("Неверный выбор диска.")
 
+    # 4. Тип файловой системы
     filesystems = ["ext4", "btrfs", "xfs", "f2fs"]
-    selected_fs = radiolist_dialog(
-        title="Файловая система",
-        text="Выберите тип файловой системы:",
-        values=[(fs, fs) for fs in filesystems]
-    ).run()
-    if not selected_fs:
-        print("Файловая система не выбрана. Установка прервана.")
-        exit(1)
+    print("Доступные файловые системы:", ", ".join(filesystems))
+    while True:
+        filesystem = input("Выберите тип файловой системы: ").lower()
+        if filesystem in filesystems:
+            break
+        print("Неверный выбор файловой системы.")
 
-    use_swap = confirm("Создать swap-раздел?")
+    # 5. Swap-раздел
+    use_swap = input("Создать swap-раздел? (yes/no): ").lower() == "yes"
     swap_size = ""
     if use_swap:
-        swap_size = session.prompt("Введите размер swap-раздела (например, 2G): ", default="2G")
-        if not swap_size:
-            print("Ошибка ввода. Установка прервана.")
-            exit(1)
+        swap_size = input("Введите размер swap-раздела (например, 2G): ").strip() or "2G"
 
+    # 6. Часовой пояс
     timezones = ["Europe/Moscow", "America/New_York", "Asia/Tokyo"]
-    selected_tz = radiolist_dialog(
-        title="Часовой пояс",
-        text="Выберите часовой пояс:",
-        values=[(tz, tz) for tz in timezones]
-    ).run()
-    if not selected_tz:
-        print("Часовой пояс не выбран. Установка прервана.")
-        exit(1)
+    print("Доступные часовые пояса:", ", ".join(timezones))
+    while True:
+        timezone = input("Выберите часовой пояс: ")
+        if timezone in timezones:
+            break
+        print("Неверный выбор часового пояса.")
 
+    # 7. Локаль
     locales = ["ru_RU.UTF-8", "en_US.UTF-8", "ja_JP.UTF-8"]
-    selected_locale = radiolist_dialog(
-        title="Локаль",
-        text="Выберите локаль:",
-        values=[(loc, loc) for loc in locales]
-    ).run()
-    if not selected_locale:
-        print("Локаль не выбрана. Установка прервана.")
-        exit(1)
+    print("Доступные локали:", ", ".join(locales))
+    while True:
+        locale = input("Выберите локаль: ")
+        if locale in locales:
+            break
+        print("Неверный выбор локали.")
 
-    use_luks = confirm("Использовать шифрование LUKS?")
+    # 8. Шифрование LUKS
+    use_luks = input("Использовать шифрование LUKS? (yes/no): ").lower() == "yes"
     luks_password = None
     if use_luks:
-        luks_password = password_dialog(
-            title="LUKS",
-            text="Введите пароль для LUKS:"
-        ).run()
-        luks_confirm = password_dialog(
-            title="LUKS",
-            text="Повторите пароль для LUKS:"
-        ).run()
-        if luks_password != luks_confirm or not luks_password:
-            print("Пароли LUKS не совпадают или пустые. Установка прервана.")
-            exit(1)
+        while True:
+            luks_password = input("Введите пароль для LUKS: ")
+            luks_confirm = input("Повторите пароль для LUKS: ")
+            if luks_password == luks_confirm and luks_password:
+                break
+            print("Пароли LUKS не совпадают или пустые.")
 
+    # 9. Выбор загрузчика
     bootloaders = ["GRUB", "systemd-boot"]
-    selected_bootloader = radiolist_dialog(
-        title="Загрузчик",
-        text="Выберите загрузчик:",
-        values=[(bl, bl) for bl in bootloaders]
-    ).run()
-    if not selected_bootloader:
-        print("Загрузчик не выбран. Установка прервана.")
-        exit(1)
+    print("Доступные загрузчики:", ", ".join(bootloaders))
+    while True:
+        bootloader = input("Выберите загрузчик: ").upper()
+        if bootloader in bootloaders:
+            break
+        print("Неверный выбор загрузчика.")
 
+    # Финальная проверка
     print("\nВаши настройки:")
     print(f"Имя пользователя: {username}")
     print("Пароль: [скрыт]")
-    print(f"Диск: {selected_disk}")
-    print(f"Файловая система: {selected_fs}")
+    print(f"Диск: {disk}")
+    print(f"Файловая система: {filesystem}")
     print(f"Swap-раздел: {swap_size if use_swap else 'Нет'}")
-    print(f"Часовой пояс: {selected_tz}")
-    print(f"Локаль: {selected_locale}")
+    print(f"Часовой пояс: {timezone}")
+    print(f"Локаль: {locale}")
     print(f"Шифрование LUKS: {'Да' if use_luks else 'Нет'}")
-    print(f"Загрузчик: {selected_bootloader}")
+    print(f"Загрузчик: {bootloader}")
 
-    if confirm("Всё верно? Начать установку?"):
+    confirm = input("Всё верно? Начать установку? (yes/no): ").lower() == "yes"
+    if confirm:
         install_system(
-            username, password, selected_disk, selected_fs, use_swap, swap_size,
-            selected_tz, selected_locale, use_luks, luks_password, selected_bootloader
+            username, password, disk, filesystem, use_swap, swap_size,
+            timezone, locale, use_luks, luks_password, bootloader
         )
         print("Установка завершена успешно!")
     else:
